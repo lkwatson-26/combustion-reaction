@@ -169,7 +169,9 @@ def parse_positive(text: str) -> float:
         value = float(text)
     except ValueError:
         return -1.0
-    if value <= 0:
+    # float() also accepts the words "nan" and "inf", so require a real,
+    # finite number above 0 (comparisons with nan are always False).
+    if not (0 < value < float("inf")):
         return -1.0
     return value
 
@@ -376,61 +378,277 @@ def state_with(carbon: int, hydrogen: int, oxygen: int) -> State:
     return state
 
 
-# Helpers
-assert_equal(build_formula(make_compound(2, 6, 1).elements), "C2H6O")
+def count_type(content: list, kind: type) -> int:
+    """Test helper: count the items in a Page's content that are of a type."""
+    count = 0
+    for item in content:
+        if isinstance(item, kind):
+            count += 1
+    return count
+
+
+def is_balanced(fuel: Compound) -> bool:
+    """Test helper: check C, H, and O atoms match on both sides of the equation."""
+    coefficients = get_coefficients(fuel)
+    if len(coefficients) == 0:
+        return False
+    fuel_count = coefficients[FUEL]
+    carbon_ok = fuel_count * get_quantity(fuel, "C") == coefficients[CARBON_DIOXIDE]
+    hydrogen_ok = fuel_count * get_quantity(fuel, "H") == 2 * coefficients[WATER]
+    oxygen_left = fuel_count * get_quantity(fuel, "O") + 2 * coefficients[OXYGEN]
+    oxygen_right = 2 * coefficients[CARBON_DIOXIDE] + coefficients[WATER]
+    return carbon_ok and hydrogen_ok and oxygen_left == oxygen_right
+
+
+def all_balanced() -> bool:
+    """Test helper: check many different fuels all balance."""
+    fuels = [(1, 4, 0), (2, 6, 0), (2, 4, 0), (2, 2, 0), (3, 8, 0), (4, 10, 0),
+             (8, 18, 0), (1, 4, 1), (2, 6, 1), (1, 4, 3), (6, 12, 6)]
+    for carbon, hydrogen, oxygen in fuels:
+        if not is_balanced(make_compound(carbon, hydrogen, oxygen)):
+            return False
+    return True
+
+
+# --- new_state, state_with, and the test helpers themselves
+assert_equal(new_state().history, [])
+assert_equal(new_state().oxygen_mode, "")
+assert_equal(new_state().limiting_reactant, "")
+assert_equal(new_state().hydrocarbon.name, "")
+first_state = new_state()
+first_state.history.append(make_compound(1, 4, 0))
+assert_equal(len(new_state().history), 0)  # states must not share one list
+assert_equal(state_with(2, 6, 0).hydrocarbon.name, "C2H6")
+assert_equal(count_type([1, "a", 2], int), 2)
+assert_equal(count_type([], int), 0)
+assert_equal(is_balanced(make_compound(1, 2, 5)), False)  # can't combust
+assert_equal(all_balanced(), True)
+
+# --- total_mass
+assert_equal(total_mass([]), 0.0)
 assert_equal(round(total_mass(make_compound(1, 4, 0).elements), 3), 16.043)
+assert_equal(round(total_mass(make_compound(2, 6, 0).elements), 3), 30.07)
+assert_equal(round(total_mass(make_compound(2, 6, 1).elements), 3), 46.069)
+assert_equal(round(total_mass([Element("H", 2, 1.008)]), 3), 2.016)
+
+# --- build_formula
+assert_equal(build_formula([]), "")
+assert_equal(build_formula(make_compound(1, 4, 0).elements), "CH4")
+assert_equal(build_formula(make_compound(2, 6, 1).elements), "C2H6O")
+assert_equal(build_formula(make_compound(1, 1, 1).elements), "CHO")
+assert_equal(build_formula(make_compound(10, 22, 0).elements), "C10H22")
+assert_equal(build_formula(make_compound(6, 12, 6).elements), "C6H12O6")
+
+# --- make_compound
+methane = make_compound(1, 4, 0)
+assert_equal(methane.name, "CH4")
+assert_equal(methane.amount, 1)
+assert_equal(len(methane.elements), 3)
+assert_equal(methane.elements[0].name, "C")
+assert_equal(methane.elements[1].quantity, 4)
+assert_equal(methane.elements[2].quantity, 0)
+assert_equal(round(methane.molar_mass, 3), 16.043)
+assert_equal(methane.weight, methane.molar_mass)
+assert_equal(make_compound(3, 8, 0).elements[0].molar_mass, 12.011)
+
+# --- valid_counts
 assert_equal(valid_counts("1", "4", "0"), True)
-assert_equal(valid_counts("0", "4", "0"), False)
+assert_equal(valid_counts("10", "22", "3"), True)
+assert_equal(valid_counts("0", "4", "0"), False)    # needs carbon
+assert_equal(valid_counts("1", "0", "0"), False)    # needs hydrogen
 assert_equal(valid_counts("a", "4", "0"), False)
+assert_equal(valid_counts("1", "4", "x"), False)
+assert_equal(valid_counts("", "4", "0"), False)
+assert_equal(valid_counts("1", "", "0"), False)
+assert_equal(valid_counts("1", "4", ""), False)
+assert_equal(valid_counts("-1", "4", "0"), False)
+assert_equal(valid_counts("1.5", "4", "0"), False)
+
+# --- get_quantity
+assert_equal(get_quantity(make_compound(2, 6, 0), "C"), 2)
 assert_equal(get_quantity(make_compound(2, 6, 0), "H"), 6)
+assert_equal(get_quantity(make_compound(2, 6, 0), "O"), 0)
+assert_equal(get_quantity(make_compound(2, 6, 1), "O"), 1)
+assert_equal(get_quantity(make_compound(2, 6, 1), "N"), 0)   # not in compound
+assert_equal(get_quantity(new_state().hydrocarbon, "C"), 0)  # empty compound
+
+# --- get_coefficients (known answers, then a balance check)
 assert_equal(get_coefficients(make_compound(1, 4, 0)), [1, 2, 1, 2])
 assert_equal(get_coefficients(make_compound(2, 6, 0)), [2, 7, 4, 6])
+assert_equal(get_coefficients(make_compound(2, 4, 0)), [1, 3, 2, 2])
+assert_equal(get_coefficients(make_compound(2, 2, 0)), [2, 5, 4, 2])
+assert_equal(get_coefficients(make_compound(3, 8, 0)), [1, 5, 3, 4])
+assert_equal(get_coefficients(make_compound(8, 18, 0)), [2, 25, 16, 18])
+assert_equal(get_coefficients(make_compound(1, 4, 1)), [2, 3, 2, 4])
 assert_equal(get_coefficients(make_compound(2, 6, 1)), [1, 3, 2, 3])
-assert_equal(get_coefficients(make_compound(1, 2, 5)), [])
+assert_equal(get_coefficients(make_compound(6, 12, 6)), [1, 6, 6, 6])
+assert_equal(get_coefficients(make_compound(1, 2, 5)), [])  # too much oxygen
+assert_equal(get_coefficients(make_compound(1, 4, 4)), [])  # exactly zero O2
+assert_equal(get_coefficients(new_state().hydrocarbon), [])  # empty compound
+
+# --- term
 assert_equal(term(1, "O2"), "O2")
 assert_equal(term(3, "O2"), "3 O2")
+assert_equal(term(12, "H2O"), "12 H2O")
+
+# --- format_equation
 assert_equal(format_equation(make_compound(1, 4, 0), [1, 2, 1, 2]),
              "CH4 + 2 O2 → CO2 + 2 H2O")
-assert_equal(parse_positive("2.5"), 2.5)
-assert_equal(parse_positive("abc"), -1.0)
-assert_equal(parse_positive("-3"), -1.0)
-assert_equal(reaction_runs(32.0, 16.0, 2), 1.0)
-assert_equal([round(w, 3) for w in product_weights([1, 2, 1, 2], 1.0)],
-             [44.009, 36.03])
-assert_equal(history_lines([make_compound(1, 4, 0)]), ["CH4 (16.043 g/mol)"])
+assert_equal(format_equation(make_compound(2, 6, 0), [2, 7, 4, 6]),
+             "2 C2H6 + 7 O2 → 4 CO2 + 6 H2O")
+assert_equal(format_equation(make_compound(2, 6, 1), [1, 3, 2, 3]),
+             "C2H6O + 3 O2 → 2 CO2 + 3 H2O")
 
-# Style helpers: they only build Drafter components, whose exact contents
-# can't be compared reliably, so each test checks that a component is made.
+# --- parse_positive
+assert_equal(parse_positive("2.5"), 2.5)
+assert_equal(parse_positive("10"), 10.0)
+assert_equal(parse_positive("0.001"), 0.001)
+assert_equal(parse_positive("abc"), -1.0)
+assert_equal(parse_positive(""), -1.0)
+assert_equal(parse_positive("   "), -1.0)
+assert_equal(parse_positive("0"), -1.0)
+assert_equal(parse_positive("-3"), -1.0)
+assert_equal(parse_positive("-0.5"), -1.0)
+assert_equal(parse_positive("1,5"), -1.0)
+assert_equal(parse_positive("nan"), -1.0)
+assert_equal(parse_positive("inf"), -1.0)
+
+# --- reaction_runs
+assert_equal(reaction_runs(32.0, 16.0, 2), 1.0)
+assert_equal(reaction_runs(16.043, 16.043, 1), 1.0)
+assert_equal(reaction_runs(0.0, 16.043, 1), 0.0)
+assert_equal(reaction_runs(64.0, 16.0, 2), 2.0)       # bigger coefficient, fewer runs
+assert_equal(reaction_runs(64.0, 16.0, 4), 1.0)
+
+# --- product_weights
+assert_equal([round(w, 3) for w in product_weights([1, 2, 1, 2], 1.0)], [44.009, 36.03])
+assert_equal([round(w, 3) for w in product_weights([1, 2, 1, 2], 2.0)], [88.018, 72.06])
+assert_equal(product_weights([1, 2, 1, 2], 0.0), [0.0, 0.0])
+assert_equal([round(w, 3) for w in product_weights([2, 7, 4, 6], 0.5)], [88.018, 54.045])
+
+# --- history_lines
+assert_equal(history_lines([]), [])
+assert_equal(history_lines([make_compound(1, 4, 0)]), ["CH4 (16.043 g/mol)"])
+assert_equal(history_lines([make_compound(1, 4, 0), make_compound(2, 6, 0)]),
+             ["CH4 (16.043 g/mol)", "C2H6 (30.07 g/mol)"])
+
+# --- style helpers: they only build Drafter components, whose exact contents
+# can't be compared reliably, so each test checks that the right type is made.
 assert_equal(isinstance(page_title("Hi"), Header), True)
+assert_equal(isinstance(page_title(""), Header), True)
 assert_equal(isinstance(info_card("Hi"), Div), True)
 assert_equal(isinstance(result_card("Hi", "There"), Div), True)
+assert_equal(isinstance(result_card(), Div), True)
 assert_equal(isinstance(error_card("Oops"), Div), True)
 
-# Routes: styled pages contain components, so the tests check the returned
-# Page type and the State changes instead of comparing page text.
-assert_equal(isinstance(index(new_state()), Page), True)
+# --- index: a Page with exactly 3 text boxes (C, H, O) and 2 buttons
+home_page = index(new_state())
+assert_equal(isinstance(home_page, Page), True)
+assert_equal(count_type(home_page.content, TextBox), 3)
+assert_equal(count_type(home_page.content, Button), 2)
 
+# --- set_hydrocarbon
 good_page = set_hydrocarbon(new_state(), "1", "4", "0")
 assert_equal(good_page.state.hydrocarbon.name, "CH4")
 assert_equal(len(good_page.state.history), 1)
-bad_page = set_hydrocarbon(new_state(), "x", "4", "0")
-assert_equal(len(bad_page.state.history), 0)
+assert_equal(good_page.state.history[0] is good_page.state.hydrocarbon, True)
+assert_equal(count_type(good_page.content, Button), 2)
+assert_equal(set_hydrocarbon(new_state(), "2", "6", "1").state.hydrocarbon.name, "C2H6O")
+assert_equal(set_hydrocarbon(new_state(), "10", "22", "0").state.hydrocarbon.name, "C10H22")
 
-assert_equal(isinstance(show_reaction(state_with(1, 4, 0)), Page), True)
-assert_equal(isinstance(show_reaction(state_with(1, 2, 5)), Page), True)
-assert_equal(isinstance(choose_oxygen(new_state()), Page), True)
-assert_equal(excess_page(state_with(1, 4, 0)).state.oxygen_mode, "excess")
-assert_equal(limited_page(state_with(1, 4, 0)).state.oxygen_mode, "limited")
+# invalid input: nothing is stored and the old compound is kept
+for bad_counts in [("x", "4", "0"), ("0", "4", "0"), ("1", "0", "0"), ("", "", ""),
+                   ("-1", "4", "0"), ("1.5", "4", "0"), ("1", "4", "y")]:
+    bad_page = set_hydrocarbon(new_state(), bad_counts[0], bad_counts[1], bad_counts[2])
+    assert_equal(len(bad_page.state.history), 0)
+    assert_equal(bad_page.state.hydrocarbon.name, "")
+    assert_equal(count_type(bad_page.content, Button), 1)
 
+kept_state = state_with(1, 4, 0)
+assert_equal(set_hydrocarbon(kept_state, "x", "4", "0").state.hydrocarbon.name, "CH4")
+
+# two submissions: history grows in order and hydrocarbon is the newest
+two_state = set_hydrocarbon(new_state(), "1", "4", "0").state
+two_state = set_hydrocarbon(two_state, "2", "6", "0").state
+assert_equal(len(two_state.history), 2)
+assert_equal(two_state.history[0].name, "CH4")
+assert_equal(two_state.history[1].name, "C2H6")
+assert_equal(two_state.hydrocarbon.name, "C2H6")
+
+# --- show_reaction: 4 items when it works, 3 (with an error) when it can't
+assert_equal(len(show_reaction(state_with(1, 4, 0)).content), 4)
+assert_equal(len(show_reaction(state_with(6, 12, 6)).content), 4)
+assert_equal(len(show_reaction(state_with(1, 2, 5)).content), 3)
+assert_equal(len(show_reaction(state_with(1, 4, 4)).content), 3)
+assert_equal(show_reaction(state_with(1, 4, 0)).state.hydrocarbon.name, "CH4")
+
+# --- choose_oxygen
+oxygen_choice_page = choose_oxygen(new_state())
+assert_equal(isinstance(oxygen_choice_page, Page), True)
+assert_equal(count_type(oxygen_choice_page.content, Button), 2)
+assert_equal(count_type(oxygen_choice_page.content, TextBox), 0)
+
+# --- excess_page and limited_page
+excess_result = excess_page(state_with(1, 4, 0))
+assert_equal(excess_result.state.oxygen_mode, "excess")
+assert_equal(count_type(excess_result.content, TextBox), 1)
+limited_result = limited_page(state_with(1, 4, 0))
+assert_equal(limited_result.state.oxygen_mode, "limited")
+assert_equal(count_type(limited_result.content, TextBox), 2)
+switched_state = excess_page(state_with(1, 4, 0)).state
+assert_equal(limited_page(switched_state).state.oxygen_mode, "limited")
+assert_equal(excess_page(switched_state).state.oxygen_mode, "excess")
+
+# --- results_page
+assert_equal(results_page(state_with(1, 4, 0), "CH4", 1.0).state.limiting_reactant, "CH4")
+assert_equal(results_page(state_with(1, 4, 0), "O2", 0.5).state.limiting_reactant, "O2")
+assert_equal(isinstance(results_page(state_with(2, 6, 0), "C2H6", 2.0), Page), True)
+
+# --- calculate_excess
 assert_equal(calculate_excess(state_with(1, 4, 0), "16.043").state.limiting_reactant, "CH4")
-assert_equal(calculate_excess(state_with(1, 4, 0), "abc").state.limiting_reactant, "")
+assert_equal(calculate_excess(state_with(2, 6, 0), "1").state.limiting_reactant, "C2H6")
+assert_equal(calculate_excess(state_with(2, 6, 1), "5.5").state.limiting_reactant, "C2H6O")
+for bad_weight in ["abc", "", "0", "-5", "nan", "inf"]:
+    bad_result = calculate_excess(state_with(1, 4, 0), bad_weight)
+    assert_equal(bad_result.state.limiting_reactant, "")
+    assert_equal(count_type(bad_result.content, Button), 1)
+
+# --- calculate_limited
 assert_equal(calculate_limited(state_with(1, 4, 0), "16.043", "32").state.limiting_reactant, "O2")
 assert_equal(calculate_limited(state_with(1, 4, 0), "1", "100").state.limiting_reactant, "CH4")
+assert_equal(calculate_limited(state_with(2, 6, 0), "30.07", "100").state.limiting_reactant, "O2")
+assert_equal(calculate_limited(state_with(2, 6, 0), "1", "100").state.limiting_reactant, "C2H6")
+assert_equal(calculate_limited(state_with(2, 6, 1), "1", "100").state.limiting_reactant, "C2H6O")
+for bad_pair in [("abc", "10"), ("10", "abc"), ("0", "10"), ("10", "0"),
+                 ("-1", "10"), ("10", "-1"), ("", ""), ("nan", "10")]:
+    bad_result = calculate_limited(state_with(1, 4, 0), bad_pair[0], bad_pair[1])
+    assert_equal(bad_result.state.limiting_reactant, "")
+    assert_equal(count_type(bad_result.content, Button), 1)
 
+# --- show_history
 assert_equal(isinstance(show_history(new_state()), Page), True)
+assert_equal(len(show_history(new_state()).state.history), 0)
 history_state = state_with(1, 4, 0)
 history_state.history.append(history_state.hydrocarbon)
-assert_equal(isinstance(show_history(history_state), Page), True)
+history_state.history.append(make_compound(2, 6, 0))
+history_page = show_history(history_state)
+assert_equal(isinstance(history_page, Page), True)
+assert_equal(len(history_page.state.history), 2)   # viewing doesn't change it
+assert_equal(count_type(history_page.content, Button), 1)
+
+# --- full workflow: enter a compound, choose oxygen, calculate
+workflow_state = set_hydrocarbon(new_state(), "1", "4", "0").state
+workflow_state = excess_page(workflow_state).state
+workflow_state = calculate_excess(workflow_state, "16.043").state
+assert_equal(workflow_state.oxygen_mode, "excess")
+assert_equal(workflow_state.limiting_reactant, "CH4")
+assert_equal(len(workflow_state.history), 1)
+
+limited_workflow = set_hydrocarbon(new_state(), "2", "6", "0").state
+limited_workflow = limited_page(limited_workflow).state
+limited_workflow = calculate_limited(limited_workflow, "30.07", "100").state
+assert_equal(limited_workflow.oxygen_mode, "limited")
+assert_equal(limited_workflow.limiting_reactant, "O2")
 
 # ------------------------------------------------------- site-wide styling
 # Configuration calls: these run once at startup, so they are not variables.
