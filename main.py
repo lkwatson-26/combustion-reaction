@@ -68,6 +68,14 @@ def result_card(*lines: str) -> Div:
                style_border="2px solid " + ACCENT_COLOR)
 
 
+def equation_card(equation: str) -> Div:
+    """Return a green box showing an equation in a monospace font."""
+    return Div(monospace(equation),
+               style_background_color=RESULT_BACKGROUND,
+               style_padding="12px",
+               style_border="2px solid " + ACCENT_COLOR)
+
+
 def error_card(message: str) -> Div:
     """Return a red box that shows an error message."""
     return Div(change_color(message, ERROR_COLOR),
@@ -263,7 +271,7 @@ def show_reaction(state: State) -> Page:
 
     return Page(state, [
         page_title("Balanced Reaction"),
-        result_card(monospace(format_equation(state.hydrocarbon, coefficients))),
+        equation_card(format_equation(state.hydrocarbon, coefficients)),
         Button("Calculate product weights", choose_oxygen),
         Button("Start over", index),
     ])
@@ -539,6 +547,7 @@ assert_equal(isinstance(page_title(""), Header), True)
 assert_equal(isinstance(info_card("Hi"), Div), True)
 assert_equal(isinstance(result_card("Hi", "There"), Div), True)
 assert_equal(isinstance(result_card(), Div), True)
+assert_equal(isinstance(equation_card("CH4 + 2 O2"), Div), True)
 assert_equal(isinstance(error_card("Oops"), Div), True)
 
 # --- index: a Page with exactly 3 text boxes (C, H, O) and 2 buttons
